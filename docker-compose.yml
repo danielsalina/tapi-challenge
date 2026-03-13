@@ -1,0 +1,98 @@
+# =============================================================
+# TAPI BACKEND CHALLENGE - DOCKER COMPOSE
+# PROFILES:
+#   localstack  -> levanta LocalStack (sandbox y QA)
+#   app         -> levanta las lambdas como procesos locales
+#   all         -> todo junto
+# USO:
+#   docker compose --profile localstack up -d
+#   docker compose --profile localstack --profile app up
+# =============================================================
+
+services:
+
+  # -------------------------------------------------------
+  # LOCALSTACK - SIMULA TODOS LOS SERVICIOS AWS
+  # -------------------------------------------------------
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: tapi-localstack
+    profiles: ["localstack", "all"]
+    ports:
+      - "4566:4566"       # ENDPOINT PRINCIPAL LOCALSTACK
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=sqs,dynamodb,eventbridge,lambda,logs
+      - DEBUG=0
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - PERSIST_ALL=1                          # PERSISTIR ESTADO ENTRE REINICIOS
+      - LOCALSTACK_VOLUME_DIR=/var/lib/localstack
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - tapi-network
+
+  # -------------------------------------------------------
+  # SCHEDULER LAMBDA COMO PROCESO LOCAL (PARA DESARROLLO)
+  # -------------------------------------------------------
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development          # MULTI-STAGE: SOLO EL TARGET DEV
+    container_name: tapi-scheduler
+    profiles: ["app", "all"]
+    command: ["ts-node", "src/main/schedulerLambda.ts"]
+    env_file: .env
+    environment:
+      - NODE_ENV=sandbox
+      - AWS_ENDPOINT_URL=http://localstack:4566  # APUNTA AL LOCALSTACK DEL COMPOSE
+    depends_on:
+      localstack:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src:ro          # HOT RELOAD DEL CODIGO EN DEV
+    networks:
+      - tapi-network
+
+  # -------------------------------------------------------
+  # WORKER LAMBDA COMO PROCESO LOCAL (PARA DESARROLLO)
+  # -------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: tapi-worker
+    profiles: ["app", "all"]
+    command: ["ts-node", "src/main/workerLambda.ts"]
+    env_file: .env
+    environment:
+      - NODE_ENV=sandbox
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src:ro
+    networks:
+      - tapi-network
+
+volumes:
+  localstack-data:
+    driver: local
+
+networks:
+  tapi-network:
+    driver: bridge

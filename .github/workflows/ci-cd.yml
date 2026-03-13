@@ -1,0 +1,263 @@
+name: CI/CD - Tapi Backend Challenge
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente a deployar'
+        required: true
+        default: 'qa'
+        type: choice
+        options: [sandbox, qa, preprod, production]
+
+env:
+  NODE_VERSION: '20'
+  AWS_REGION: us-east-1
+
+# =====================================================================
+# JOBS DEL PIPELINE
+# =====================================================================
+jobs:
+
+  # -------------------------------------------------------------------
+  # JOB 1: CALIDAD DE CODIGO
+  # -------------------------------------------------------------------
+  quality:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: TypeScript check (tsc --noEmit)
+        run: npx tsc --noEmit
+
+  # -------------------------------------------------------------------
+  # JOB 2: TESTS UNITARIOS
+  # -------------------------------------------------------------------
+  unit-tests:
+    name: Tests Unitarios
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar tests unitarios con coverage
+        run: npm run test:unit -- --coverage --coverageReporters=lcov --coverageReporters=text
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  # -------------------------------------------------------------------
+  # JOB 3: TESTS DE INTEGRACION CON LOCALSTACK
+  # -------------------------------------------------------------------
+  integration-tests:
+    name: Tests Integracion (LocalStack)
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      localstack:
+        image: localstack/localstack:3.4
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: sqs,dynamodb
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 20s
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar AWS CLI Local
+        run: pip install awscli-local
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Setup recursos LocalStack
+        run: bash scripts/localstack-init.sh
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+
+      - name: Ejecutar tests de integracion
+        run: npm run test:integration
+        env:
+          NODE_ENV: sandbox
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          DYNAMODB_TABLE_REGISTROS: tapi-registros
+          DYNAMODB_TABLE_RESULTADOS: tapi-resultados
+          DYNAMODB_TABLE_LOCKS: tapi-locks
+          SQS_QUEUE_URL: http://localhost:4566/000000000000/tapi-jobs.fifo
+          SQS_DLQ_URL: http://localhost:4566/000000000000/tapi-jobs-dlq.fifo
+          INTERNAL_API_BASE_URL: http://localhost:4566/_localstack/mock
+          INTERNAL_API_TIMEOUT_MS: "5000"
+          INTERNAL_API_MAX_RETRIES: "1"
+          LOCK_TTL_SECONDS: "30"
+          LOG_LEVEL: error
+          SCHEDULER_BATCH_SIZE: "100"
+          SCHEDULER_HOURS: "24"
+
+  # -------------------------------------------------------------------
+  # JOB 4: BUILD DOCKER IMAGE
+  # -------------------------------------------------------------------
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.ECR_REGISTRY }}/tapi-backend-challenge
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Login to Amazon ECR
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build multi-stage image (production target)
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # -------------------------------------------------------------------
+  # JOB 5: DEPLOY A QA (AUTO EN PUSH A DEVELOP)
+  # -------------------------------------------------------------------
+  deploy-qa:
+    name: Deploy QA
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment:
+      name: qa
+      url: https://qa.tapi.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_QA }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_QA }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update Lambda Scheduler (QA)
+        run: |
+          aws lambda update-function-code \
+            --function-name tapi-qa-scheduler \
+            --image-uri ${{ needs.build.outputs.image-tag }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update Lambda Worker (QA)
+        run: |
+          aws lambda update-function-code \
+            --function-name tapi-qa-worker \
+            --image-uri ${{ needs.build.outputs.image-tag }} \
+            --region ${{ env.AWS_REGION }}
+
+  # -------------------------------------------------------------------
+  # JOB 6: DEPLOY A PRODUCCION (MANUAL + APROBACION)
+  # -------------------------------------------------------------------
+  deploy-production:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+    needs: [build, deploy-qa]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://tapi.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy gradual con Lambda Alias (Canary 10%)
+        run: |
+          # PUBLICAR NUEVA VERSION
+          VERSION=$(aws lambda publish-version \
+            --function-name tapi-prod-scheduler \
+            --description "Deploy ${{ github.sha }}" \
+            --query Version --output text)
+          
+          # ACTUALIZAR ALIAS PARA APUNTAR AL 10% DE TRAFICO A LA NUEVA VERSION
+          aws lambda update-alias \
+            --function-name tapi-prod-scheduler \
+            --name live \
+            --routing-config "AdditionalVersionWeights={$VERSION=0.1}" \
+            --function-version $VERSION
+
+          echo "DEPLOY CANARY AL 10% COMPLETADO - VERSION: $VERSION"
+          echo "MONITOREAR CLOUDWATCH POR 5 MINUTOS ANTES DE PROMOVER AL 100%"

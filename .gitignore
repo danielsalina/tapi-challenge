@@ -1,0 +1,50 @@
+# DEPENDENCIAS
+node_modules/
+.npm/
+
+# COMPILACION
+dist/
+build/
+*.js.map
+*.d.ts
+
+# VARIABLES DE ENTORNO - NUNCA SUBIR AL REPO
+.env
+.env.*
+!.env.example
+
+# TERRAFORM
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/.terraform.lock.hcl
+infra/terraform/override.tf
+infra/terraform/terraform.tfvars
+
+# LOGS
+logs/
+*.log
+npm-debug.log*
+
+# COVERAGE
+coverage/
+.nyc_output/
+
+# EDITORES
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LOCALSTACK DATA (REGENERABLE)
+.localstack/
+
+# CACHE
+.cache/
+
+# PYTHON
+.venv
