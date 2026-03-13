@@ -158,7 +158,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.ECR_REGISTRY }}/tapi-backend-challenge
+          images: local/tapi-backend-challenge
           tags: |
             type=sha,prefix={{branch}}-
             type=ref,event=branch

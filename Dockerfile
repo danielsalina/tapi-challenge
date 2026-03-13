@@ -22,7 +22,7 @@ FROM base AS development
 ENV NODE_ENV=sandbox
 
 # INSTALAR TODAS LAS DEPENDENCIAS (INCLUYENDO DEV)
-RUN npm ci --include=dev
+RUN npm ci --include=dev --legacy-peer-deps
 
 # COPIAR EL CODIGO FUENTE
 COPY src/ ./src/
@@ -40,7 +40,7 @@ CMD ["ts-node", "--transpile-only", "src/main/schedulerLambda.ts"]
 FROM base AS builder
 
 # INSTALAR TODAS LAS DEPENDENCIAS (NECESARIAS PARA COMPILAR)
-RUN npm ci --include=dev
+RUN npm ci --include=dev --legacy-peer-deps
 
 COPY src/ ./src/
 
@@ -48,7 +48,7 @@ COPY src/ ./src/
 RUN npx tsc --project tsconfig.json
 
 # PRUNING: DEJAR SOLO DEPENDENCIAS DE PRODUCCION
-RUN npm prune --omit=dev
+RUN npm prune --omit=dev --legacy-peer-deps
 
 # STAGE 4: PRODUCTION - IMAGEN MINIMA LISTA PARA LAMBDA/ECS
 # SOLO CONTIENE: dist/ + node_modules de produccion
