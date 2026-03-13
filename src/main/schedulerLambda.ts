@@ -1,4 +1,4 @@
-import type { ScheduledEvent } from "../types/aws-lambda"
+import type { ScheduledEvent } from 'aws-lambda'
 import { ScheduleQueriesUseCase } from "../application/usecases/ScheduleQueries"
 import { DynamoRegistroRepository } from "../infrastructure/aws/DynamoResultRepository"
 import { SqsPublisher } from "../infrastructure/aws/SqsPublisher"

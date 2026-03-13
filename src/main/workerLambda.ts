@@ -1,4 +1,4 @@
-import type { SQSEvent, SQSBatchResponse, SQSBatchItemFailure } from '../types/aws-lambda';
+import type { SQSEvent, SQSBatchResponse, SQSBatchItemFailure } from 'aws-lambda';
 import { ProcessQueryJobUseCase } from '../application/usecases/ProcessQueryJob';
 import { DynamoResultRepository } from '../infrastructure/aws/DynamoResultRepository';
 import { ProviderApiClient } from '../infrastructure/aws/ProviderApiClient';

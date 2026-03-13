@@ -31,7 +31,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.140",
+    "@types/aws-lambda": "^8.10.161",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.14.9",
     "@types/uuid": "^10.0.0",
