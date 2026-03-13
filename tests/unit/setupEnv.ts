@@ -1,0 +1,11 @@
+// VARIABLES DE ENTORNO PARA TESTS UNITARIOS
+process.env.NODE_ENV = "test"
+process.env.DYNAMODB_TABLE_REGISTROS = "test-registros"
+process.env.DYNAMODB_TABLE_RESULTADOS = "test-resultados"
+process.env.DYNAMODB_TABLE_LOCKS = "test-locks"
+process.env.SQS_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue"
+process.env.SQS_DLQ_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/test-dlq"
+process.env.SQS_BATCH_SIZE = "10"
+process.env.SQS_VISIBILITY_TIMEOUT = "300"
+process.env.INTERNAL_API_BASE_URL = "https://test-api.example.com"
+process.env.LOG_LEVEL = "error"
